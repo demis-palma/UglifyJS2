@@ -456,9 +456,7 @@ async.eachLimit(files, 1, function (file, cb) {
 
     if (STRINGS_ARRAY_NAME) {
         STRINGS_ARRAY_NAME = STRINGS_ARRAY_NAME === true ? "_strings" : STRINGS_ARRAY_NAME;
-        var retrievedStrings = extractAllStrings(output,STRINGS_ARRAY_NAME);
-        var strings = retrievedStrings.join(",");
-        output = "var " + STRINGS_ARRAY_NAME + "=[" + strings + "]" + output;
+        output = extractAllStrings(output,STRINGS_ARRAY_NAME);
     }
 
     if (FUNCTIONS_ARRAY_NAME) {
@@ -503,21 +501,23 @@ function normalize(o) {
     }
 }
 
-function extractAllStrings($text,stringArrayName) {
+function extractAllStrings(text,stringArrayName) {
     var i = 0;
     var stringsArray = [];
 
     var regexp = /".*?[^\\]"|'.*?[^\\]'/g;
-    var match = regexp.exec($text);
+    var match = regexp.exec(text);
     while (match != null) {
         // We remove original quotes/doublequotes, escape any double-quote inside, then put all between double-quotes
         stringsArray.push('"' + match[0].substring(1, match[0].length - 1).replace(/"/g,'\\"') + '"');
-        match = regexp.exec($text);
+        match = regexp.exec(text);
     }
 
-    $text = $text.replace(/".*?[^\\]"|'.*?[^\\]'/g, function() { return stringArrayName + "[" + (i++) + "]"; });
+    var textWithPlaceholders = text.replace(/".*?[^\\]"|'.*?[^\\]'/g, function() { return stringArrayName + "[" + (i++) + "]"; });
+    var strings = stringsArray.join(",");
+    text = "var " + STRINGS_ARRAY_NAME + "=[" + strings + "]" + textWithPlaceholders;
 
-    return stringsArray;
+    return text;
 }
 
 function getOptions(x, constants) {
