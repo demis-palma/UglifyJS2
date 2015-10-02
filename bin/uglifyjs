@@ -73,6 +73,7 @@ You need to pass an argument to this option to specify the name that your module
     .describe("mangle-regex", "Only mangle property names matching the regex")
     .describe("name-cache", "File to hold mangled names mappings")
     .describe("move-strings", "Moving strings in arrays")
+    .describe("move-functions", "Moving function names in arrays")
 
     .alias("p", "prefix")
     .alias("o", "output")
@@ -286,6 +287,8 @@ if (files.filter(function(el){ return el == "-" }).length > 1) {
 
 var STATS = {};
 var OUTPUT_FILE = ARGS.o;
+var STRINGS_ARRAY_NAME = ARGS.move_strings;
+var FUNCTIONS_ARRAY_NAME = ARGS.move_functions;
 var TOPLEVEL = null;
 var P_RELATIVE = ARGS.p && ARGS.p == "relative";
 var SOURCES_CONTENT = {};
@@ -348,6 +351,7 @@ async.eachLimit(files, 1, function (file, cb) {
                         expression   : ARGS.expr,
                         bare_returns : ARGS.bare_returns,
                     });
+
                 } catch(ex) {
                     if (ex instanceof UglifyJS.JS_Parse_Error) {
                         print_error("Parse error at " + file + ":" + ex.line + "," + ex.col);
@@ -450,6 +454,17 @@ async.eachLimit(files, 1, function (file, cb) {
 
     output = output.get();
 
+    if (STRINGS_ARRAY_NAME) {
+        STRINGS_ARRAY_NAME = STRINGS_ARRAY_NAME === true ? "_strings" : STRINGS_ARRAY_NAME;
+        var retrievedStrings = extractAllStrings(output,STRINGS_ARRAY_NAME);
+        var strings = retrievedStrings.join(",");
+        output = "var " + STRINGS_ARRAY_NAME + "=[" + strings + "]" + output;
+    }
+
+    if (FUNCTIONS_ARRAY_NAME) {
+        output = "var " + FUNCTIONS_ARRAY_NAME + "=[strings]" + output;
+    }
+
     if (SOURCE_MAP) {
         fs.writeFileSync(ARGS.source_map, SOURCE_MAP, "utf8");
         var source_map_url = ARGS.source_map_url || (
@@ -486,6 +501,23 @@ function normalize(o) {
         o[i.replace(/-/g, "_")] = o[i];
         delete o[i];
     }
+}
+
+function extractAllStrings($text,stringArrayName) {
+    var i = 0;
+    var stringsArray = [];
+
+    var regexp = /".*?[^\\]"|'.*?[^\\]'/g;
+    var match = regexp.exec($text);
+    while (match != null) {
+        // We remove original quotes/doublequotes, escape any double-quote inside, then put all between double-quotes
+        stringsArray.push('"' + match[0].substring(1, match[0].length - 1).replace(/"/g,'\\"') + '"');
+        match = regexp.exec($text);
+    }
+
+    $text = $text.replace(/".*?[^\\]"|'.*?[^\\]'/g, function() { return stringArrayName + "[" + (i++) + "]"; });
+
+    return stringsArray;
 }
 
 function getOptions(x, constants) {
