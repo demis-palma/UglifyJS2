@@ -453,16 +453,16 @@ async.eachLimit(files, 1, function (file, cb) {
         moveStrings();
     }
 
+    if (FUNCTIONS_ARRAY_NAME) {
+        FUNCTIONS_ARRAY_NAME = FUNCTIONS_ARRAY_NAME === true ? "_functions" : FUNCTIONS_ARRAY_NAME;
+        moveFunctions();
+    }
+
     time_it("generate", function(){
         TOPLEVEL.print(output);
     });
 
     output = output.get();
-
-    if (FUNCTIONS_ARRAY_NAME) {
-        FUNCTIONS_ARRAY_NAME = FUNCTIONS_ARRAY_NAME === true ? "_functions" : FUNCTIONS_ARRAY_NAME;
-        output = moveFunctions(output,FUNCTIONS_ARRAY_NAME);
-    }
 
     if (SOURCE_MAP) {
         fs.writeFileSync(ARGS.source_map, SOURCE_MAP, "utf8");
@@ -555,33 +555,65 @@ function moveStrings (){
             return name;
         }
     }
-    
+
     TOPLEVEL = TOPLEVEL.transform(consolidate);
 }
 
-function moveFunctions(text,functionArrayName) {
-    var y = 0;
-    var functionsArray = [];
+function moveFunctions (){
+    var functions = [];
+    var z = 0;
 
-    // Basically fetch everything after a dot and before '(' or words, but only for things outside quotes (after which are even number of quotes)
-    var regexp = /\.(\(|\w+)(?=([^"]*"[^"]*")*[^"]*$)(?=([^']*'[^']*')*[^']*$)/g;
-    var match = regexp.exec(text);
-    while (match != null) {
-        // We put all between double-quotes in the array, but only if it's not already in
-        if(functionsArray.indexOf('"' + match[1] + '"') == -1){
-            functionsArray.push('"' + match[1] + '"');
+    // The walker function
+    var consolidate = new UglifyJS.TreeTransformer(null, function(node){
+
+        if (node instanceof UglifyJS.AST_Toplevel) {
+
+            // Called just once at the end
+            var functionsElements = [];
+            for(var i = 0; i < functions.length ; i++){
+                functionsElements.push(new UglifyJS.AST_String({value:functions[i]}))
+            }
+
+            // We turn the array of String into an array of AST_String
+            var functionsArray = new UglifyJS.AST_Array({
+                elements:functionsElements
+            });
+            // Now we create as AST_Array object named after our parameter option, and whose value is our array of AST_Strings
+            var functionsArrayName = new UglifyJS.AST_Symbol({name:FUNCTIONS_ARRAY_NAME});
+            var definedAndNamedArray = new UglifyJS.AST_VarDef({name:functionsArrayName,value:functionsArray});
+
+            var defs = new UglifyJS.AST_Const({
+                // Key is the value of the string
+                definitions: [definedAndNamedArray]
+            });
+            // This is added once at the beginning of the code. We just need to make an array of it.
+            node.body.unshift(defs);
+            return node;
         }
-        match = regexp.exec(text);
-    }
-    var textWithPlaceholders = text.replace(/\.(\(|\w+)(?=([^"]*"[^"]*")*[^"]*$)(?=([^']*'[^']*')*[^']*$)/g, function(x){
-        var match = '"' + x.substring(1) + '"';
-        return "[" + functionArrayName + "[" + functionsArray.indexOf(match) + "]]"
+        if (node instanceof UglifyJS.AST_Dot) {
+            // When we encounter a function defined by a '.', we replace it its property name by a bracketed reference.
+            var reference = getFunctionName(node);
+            return new UglifyJS.AST_Sub({
+                start : node.start,
+                end   : node.end,
+                expression  : node.expression,
+                property   : reference
+            });
+        }
     });
 
-    var functions = functionsArray.join(",");
-    text = "var " + functionArrayName + "=[" + functions + "];" + textWithPlaceholders;
+    function getFunctionName(node) {
+        var func = node.property; // node is AST_Function
+        if (functions.indexOf(func) !== -1){
+            return new UglifyJS.AST_SymbolVar({name:FUNCTIONS_ARRAY_NAME + "[" + functions.indexOf(func) + "]"})
+        } else {
+            var ref = new UglifyJS.AST_SymbolVar({name:FUNCTIONS_ARRAY_NAME + "[" + (functions.length) + "]"})
+            functions.push(node.property);
+            return ref;
+        }
+    }
 
-    return text;
+    TOPLEVEL = TOPLEVEL.transform(consolidate);
 }
 
 function getOptions(x, constants) {
