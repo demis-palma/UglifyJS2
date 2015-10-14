@@ -448,19 +448,20 @@ async.eachLimit(files, 1, function (file, cb) {
         }
     }
 
+    if (STRINGS_ARRAY_NAME) {
+        STRINGS_ARRAY_NAME = STRINGS_ARRAY_NAME === true ? "_strings" : STRINGS_ARRAY_NAME;
+        moveStrings();
+    }
+
     time_it("generate", function(){
         TOPLEVEL.print(output);
     });
 
     output = output.get();
 
-    if (STRINGS_ARRAY_NAME) {
-        STRINGS_ARRAY_NAME = STRINGS_ARRAY_NAME === true ? "_strings" : STRINGS_ARRAY_NAME;
-        output = extractAllStrings(output,STRINGS_ARRAY_NAME);
-    }
-
     if (FUNCTIONS_ARRAY_NAME) {
-        output = "var " + FUNCTIONS_ARRAY_NAME + "=[strings]" + output;
+        FUNCTIONS_ARRAY_NAME = FUNCTIONS_ARRAY_NAME === true ? "_functions" : FUNCTIONS_ARRAY_NAME;
+        output = moveFunctions(output,FUNCTIONS_ARRAY_NAME);
     }
 
     if (SOURCE_MAP) {
@@ -501,21 +502,84 @@ function normalize(o) {
     }
 }
 
-function extractAllStrings(text,stringArrayName) {
-    var i = 0;
-    var stringsArray = [];
+function moveStrings (){
+    var strings = [];
 
-    var regexp = /".*?[^\\]"|'.*?[^\\]'/g;
+
+    // The walker function
+    var consolidate = new UglifyJS.TreeTransformer(null, function(node){
+
+        if (node instanceof UglifyJS.AST_Toplevel) {
+
+            // Called just once at the end
+            var stringsElements = [];
+            for(var i = 0; i < strings.length ; i++){
+                stringsElements.push(new UglifyJS.AST_String({value:strings[i]}))
+            }
+
+            // We turn the array of String into an array of AST_String
+            var stringArray = new UglifyJS.AST_Array({
+                elements:stringsElements
+            });
+            // Now we create as AST_Array object named after our parameter option, and whose value is our array of AST_Strings
+            var stringArrayName = new UglifyJS.AST_Symbol({name:STRINGS_ARRAY_NAME});
+            var definedAndNamedArray = new UglifyJS.AST_VarDef({name:stringArrayName,value:stringArray});
+
+            var defs = new UglifyJS.AST_Const({
+                // Key is the value of the string
+                definitions: [definedAndNamedArray]
+            });
+            // This is added once at the beginning of the code. We just need to make an array of it.
+            node.body.unshift(defs);
+            return node;
+        }
+        if (node instanceof UglifyJS.AST_String) {
+            // when we encounter a string, we give it an unique
+            // variable name (see the getStringName function below)
+            // and return a symbol reference instead.
+            return new UglifyJS.AST_SymbolRef({
+                start : node.start,
+                end   : node.end,
+                name  : getStringName(node)
+            });
+        }
+    });
+
+    function getStringName(node) {
+        var str = node.getValue(); // node is AST_String
+        if (strings.indexOf(str) !== -1){
+            return STRINGS_ARRAY_NAME + "[" + strings.indexOf(str) + "]";
+        } else {
+            var name = STRINGS_ARRAY_NAME + "[" + (strings.length) + "]";
+            strings.push(node.value);
+            return name;
+        }
+    }
+    
+    TOPLEVEL = TOPLEVEL.transform(consolidate);
+}
+
+function moveFunctions(text,functionArrayName) {
+    var y = 0;
+    var functionsArray = [];
+
+    // Basically fetch everything after a dot and before '(' or words, but only for things outside quotes (after which are even number of quotes)
+    var regexp = /\.(\(|\w+)(?=([^"]*"[^"]*")*[^"]*$)(?=([^']*'[^']*')*[^']*$)/g;
     var match = regexp.exec(text);
     while (match != null) {
-        // We remove original quotes/doublequotes, escape any double-quote inside, then put all between double-quotes
-        stringsArray.push('"' + match[0].substring(1, match[0].length - 1).replace(/"/g,'\\"') + '"');
+        // We put all between double-quotes in the array, but only if it's not already in
+        if(functionsArray.indexOf('"' + match[1] + '"') == -1){
+            functionsArray.push('"' + match[1] + '"');
+        }
         match = regexp.exec(text);
     }
+    var textWithPlaceholders = text.replace(/\.(\(|\w+)(?=([^"]*"[^"]*")*[^"]*$)(?=([^']*'[^']*')*[^']*$)/g, function(x){
+        var match = '"' + x.substring(1) + '"';
+        return "[" + functionArrayName + "[" + functionsArray.indexOf(match) + "]]"
+    });
 
-    var textWithPlaceholders = text.replace(/".*?[^\\]"|'.*?[^\\]'/g, function() { return stringArrayName + "[" + (i++) + "]"; });
-    var strings = stringsArray.join(",");
-    text = "var " + STRINGS_ARRAY_NAME + "=[" + strings + "]" + textWithPlaceholders;
+    var functions = functionsArray.join(",");
+    text = "var " + functionArrayName + "=[" + functions + "];" + textWithPlaceholders;
 
     return text;
 }
