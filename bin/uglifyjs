@@ -72,8 +72,8 @@ You need to pass an argument to this option to specify the name that your module
     .describe("mangle-props", "Mangle property names")
     .describe("mangle-regex", "Only mangle property names matching the regex")
     .describe("name-cache", "File to hold mangled names mappings")
-    .describe("move-strings", "Moving strings in arrays")
-    .describe("move-functions", "Moving function names in arrays")
+    .describe("move-strings", "Move strings in arrays")
+    .describe("move-functions", "Move function names in arrays")
     .describe("pure-funcs", "List of functions that can be safely removed if their return value is not used")
 
     .alias("p", "prefix")
@@ -562,7 +562,6 @@ function moveStrings (){
 
 function moveFunctions (){
     var functions = [];
-    var z = 0;
 
     // The walker function
     var consolidate = new UglifyJS.TreeTransformer(null, function(node){
